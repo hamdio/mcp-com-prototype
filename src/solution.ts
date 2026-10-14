@@ -1,9 +1,7 @@
-// Replace this tiny example with the problem agreed with your interviewer.
-// Start with interfaces, pure logic, and a testable function.
-export interface Input {
-  values: number[];
-}
+// Public entry point for the COM-backed MCP prototype. See docs/plan.md.
+export { handleToolCall, type PipelineDeps, type ToolRequest, type ToolResult } from "./pipeline.ts";
+export { ComSession, DEFAULT_SESSION_CONFIG, type ComClient, type SessionConfig } from "./comSession.ts";
+export { ALL_TOOLS, createRegistry, M1_TOOLS, type ToolDef } from "./tools.ts";
+export { BASE_LICENSE, type LicenseClient, type LicenseLease } from "./license.ts";
 
-export function solve(input: Input): number {
-  return input.values.reduce((sum, value) => sum + value, 0);
-}
+export { computeKpis, DEFAULT_LIMITS } from "./kpi.ts";

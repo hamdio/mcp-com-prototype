@@ -33,12 +33,13 @@ A small TypeScript/Node.js project: an MCP server for a desktop CAD application 
 ## Stack
 - TypeScript with strict types, Node.js ≥ 22, ESM.
 - Built-in `node:test` and `node:assert/strict`; tests live in `test/*.test.ts`.
-- `npm run start`, `npm test`, `npm run typecheck`, `npm run check`, `npm run validate` (once `src/validation/cli.ts` lands).
-- `src/solution.ts` is the starter scaffold; replace it as Milestone 1 lands.
+- `npm run start` (runs the validation report), `npm test`, `npm run typecheck`, `npm run check`, `npm run validate`.
+- `src/solution.ts` is the public entry; the pipeline is `src/pipeline.ts`; fakes for COM/auth/licence live in `src/fakes.ts`.
+- Known gaps until M2b: no user-activity gating for modifiers (P11), and real timers in session tests.
 
 ## Quality gates
 - Local: `npm run hooks:install` once per clone. pre-commit runs typecheck; pre-push runs `npm run check`.
-- CI (`.github/workflows/ci.yml`): `npm ci && npm run check` on Ubuntu and Windows, plus `npm run validate` once the runner exists.
+- CI (`.github/workflows/ci.yml`): `npm ci && npm run check` on Ubuntu and Windows, plus `npm run validate`.
 - Don't bypass hooks (`--no-verify`) unless I explicitly ask.
 - Prefer injectable clocks over real timers in session/deadline/duty-cycle tests to avoid CI flakiness.
 
