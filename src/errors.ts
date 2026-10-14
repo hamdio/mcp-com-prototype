@@ -11,6 +11,7 @@ export type ErrorCode =
   | "app_unavailable"
   | "timeout"
   | "app_error"
+  | "not_found"
   | "result_too_large"
   | "internal";
 
@@ -48,8 +49,11 @@ export const RPC_E_CALL_REJECTED = 0x80010001; // app busy, often a modal dialog
 export const RPC_E_SERVERCALL_RETRYLATER = 0x8001010a;
 export const RPC_E_DISCONNECTED = 0x80010108;
 export const RPC_S_SERVER_UNAVAILABLE = 0x800706ba; // app process gone
+// PLACEHOLDER: HRESULT_FROM_WIN32(ERROR_NOT_FOUND) until the CAD team confirms how the
+// COM API reports an unknown element or view ID.
+export const ERROR_NOT_FOUND = 0x80070490;
 
-export type ComErrorClass = "transient" | "session_lost" | "permanent";
+export type ComErrorClass = "transient" | "session_lost" | "not_found" | "permanent";
 
 /** Accepts signed or unsigned HRESULTs; COM bridges disagree on which they return. */
 export function classifyComError(hresult: number): ComErrorClass {
@@ -60,6 +64,8 @@ export function classifyComError(hresult: number): ComErrorClass {
     case RPC_E_DISCONNECTED:
     case RPC_S_SERVER_UNAVAILABLE:
       return "session_lost";
+    case ERROR_NOT_FOUND:
+      return "not_found";
     default:
       return "permanent";
   }
@@ -76,6 +82,7 @@ const SAFE_MESSAGES: Record<ErrorCode, string> = {
   app_unavailable: "The desktop application is not available.",
   timeout: "The operation did not complete in time.",
   app_error: "The desktop application reported an error.",
+  not_found: "An element or view with that ID was not found.",
   result_too_large: "The result is too large. Request a smaller page or fewer IDs.",
   internal: "An internal error occurred.",
 };

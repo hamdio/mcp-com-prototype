@@ -52,9 +52,9 @@ The real workflows come from product owners and usage data. This section defines
 **Write rules for WF-3** (constraints, see also D7, E4):
 - W1 `set_element_color` is a **set** (absolute colour), never a toggle, so it is idempotent and may be marked safe to retry.
 - W2 Writes act only on **explicit element IDs**, never on an implicit "current selection".
-- W3 _(open)_ Do agent-initiated writes require user confirmation (D7)?
+- W3 **Decided (2026-10-14):** no confirmation for agent writes in the prototype; the `model:write` scope is the gate. Revisit with the MCP transport at M4 (e.g. MCP elicitation) (D7).
 - W4 _(open)_ Undo: does the COM API offer undo/transaction grouping? If it does, add `undo_last_change`; if not, record the previous colour in the tool result so the change can be reversed.
-- W6 _(open)_ Retry vs "previous colour": if attempt 1 applied the colour but then failed (timeout / session lost), a retry reports previous = the new colour, so the undo info is wrong. Options: capture previous colours before attempt 1, or return `previousUnreliable: true` after any retry.
+- W6 **Decided (2026-10-14):** `set_element_color` returns `previousReliable: false` when a retry followed a lost session, because an earlier attempt may already have applied the colour, so `previous` may show the new colour. Busy rejections (`0x80010001`) never ran, so they keep `previousReliable: true`. Rejected alternative: read colours in a separate COM call before writing (not atomic, and doubles the UI-thread time). Tests 10, 10b and 10d.
 - W5 Telemetry for writes records the element count and `callerType`, but not element contents.
 
 ### Tool catalogue (derived from the workflows)
@@ -91,7 +91,7 @@ The real workflows come from product owners and usage data. This section defines
 | Rendering seats consumed twice for one render (MCP + app) | **0** | L3 |
 | Leaked app processes / COM references after a soak run | **0** | L5 |
 
-### 3.2 Performance & reliability _(proposed; baseline before fixing)_
+### 3.2 Performance & reliability _(provisional targets, accepted 2026-10-14; re-baseline against real COM at M5)_
 
 | KPI | Proposed limit | Notes |
 |---|---|---|
@@ -140,8 +140,8 @@ Goal: every tool call is attributable to **the user (subject)** and **who acted 
 | D3 | Effective permission = **user entitlements ∩ actor's granted scopes** | An agent can never do more than the user, and may do less (e.g. read-only) |
 | D4 | Tokens are audience-bound to this MCP server and **never passed through** to COM or other services | COM runs in the app's session; the delegation is recorded in telemetry instead |
 | D5 | Missing scope is distinct from a missing licence | New error code `forbidden` (actor lacks scope) vs `unlicensed` (user lacks entitlement) |
-| D6 | _(open)_ With stdio transport, one server process serves one client, so identity is effectively per process/session, not per call | Decide: verify once at session start + re-verify on expiry, or verify per call |
-| D7 | _(open)_ Agent-initiated writes require explicit user confirmation? | Affects write tools only |
+| D6 | **Decided (2026-10-14):** verify the delegated token **per call** in the prototype. With stdio, identity is effectively per process/session | Revisit at M4 once auth latency is baselined: verify at session start + re-verify on expiry |
+| D7 | **Decided (2026-10-14):** no explicit confirmation for agent writes in the prototype (W3) | Revisit at M4 with the transport (MCP elicitation) |
 | D8 | Telemetry records `subject` (pseudonymised), `actor`, `callerType` | T1 fields |
 
 _(open: auth caching TTL vs revocation delay; which identity wins if the MCP subject differs from the app's signed-in user.)_
@@ -176,7 +176,7 @@ The rendering feature licence can be satisfied by one of several **activation me
 | LIC9 | **Agents cannot activate, deactivate or change licences** | No licence-management tools in the MCP catalogue |
 | LIC10 | **Avoid double consumption**: if the desktop app already checks out a rendering seat when `Render` is called via COM, the MCP must not check one out as well | _(open, critical)_ Does the app enforce rendering licensing inside its COM call? If yes, the MCP does a pre-check only (fail fast) and lets the app consume |
 | LIC11 | Long renders hold seats: lease renewal while running; seats are always released on success, failure, timeout, cancel and MCP session close | Ties to P4 session cleanup and the §3.1 "0 seats held" gate |
-| LIC14 | _(open)_ **Seat release timing when the caller times out** while COM is still rendering: release at caller timeout (under-counts usage) vs at COM completion (holds the seat longer) | Interacts with LIC10; test 14 depends on the decision |
+| LIC14 | **Decided (2026-10-14): leases are released when the COM work really finishes**, not when the caller gets `timeout`, so seat usage isn't under-counted while the app is still rendering. Every release emits a `license_released` event (features, seat hold time, failed releases), so a failed release, which could be a seat leak, is visible | `ComSession.execute(…, onSettled)`; tests 14a–14d |
 | LIC12 | Caching per method: serial → per MCP session; named-user → until token expiry; licence server → no caching of seats (lease only) | _(open: revocation delay acceptable?)_ |
 | LIC13 | _(open)_ Is the rendering licence tied to the **subject** (the delegated user), the machine, or the app's signed-in user? | With named-user licensing, the MCP subject and the app user must match (see A5) |
 
@@ -228,8 +228,8 @@ Terminology: **COM session** = the single connection to the app (S1, one per app
 
 | ID | Constraint | Design implication |
 |---|---|---|
-| E1 | **Stable error taxonomy**, aligned with the Python MCP _(open)_ | `invalid_input`, `unauthenticated`, `auth_unavailable`, `forbidden`, `unlicensed`, `license_unavailable`, `rate_limited`, `user_active`, `app_busy`, `app_unavailable`, `timeout`, `app_error`, `internal`. _(proposed additions: `not_found` for stale/unknown element IDs so agents can re-plan; `result_too_large` for results over the size cap. That call already reached COM, so it must not be reported as `invalid_input`)_ |
-| E2 | COM failure codes (HRESULTs) are **classified** as transient, session-lost or permanent | `0x80010001` → transient; `0x800706BA` → session-lost; otherwise `app_error` |
+| E1 | **Stable error taxonomy**, aligned with the Python MCP _(open)_ | `invalid_input`, `unauthenticated`, `auth_unavailable`, `forbidden`, `unlicensed`, `license_unavailable`, `rate_limited`, `user_active`, `app_busy`, `app_unavailable`, `timeout`, `app_error`, `internal`. **Adopted 2026-10-14:** `not_found` for stale or unknown element/view IDs, so agents can re-plan; mapped from a not-found HRESULT (placeholder `0x80070490` until the CAD team confirms) and never retried. `result_too_large` for results over the size cap; that call already reached COM, so it isn't `invalid_input`. Both are agent-side, so neither counts in the non-user error rate |
+| E2 | COM failure codes (HRESULTs) are **classified** as transient, session-lost, not-found or permanent | `0x80010001` → transient; `0x800706BA` → session-lost; not-found → `not_found`; otherwise `app_error` |
 | E3 | **Retry only transient errors**, bounded attempts + backoff + jitter, inside the deadline | _(proposed: 3 attempts, 200ms base)_ |
 | E4 | Automatic retry is only allowed for read-only / idempotent tools | `access: "read" \| "write"` per tool |
 | E5 | Session-lost → one reconnect + one retry; then `app_unavailable` | |
@@ -245,7 +245,7 @@ Terminology: **COM session** = the single connection to the app (S1, one per app
 | T3 | Telemetry failures never fail a tool call | Fire-and-forget, guarded |
 | T4 | _(open)_ Schema and PII rules match the Python MCP | Assumption: no tool inputs or outputs logged |
 | T5 | Telemetry is enough to **compute every KPI in §3** from production data | Each KPI maps to the event fields above |
-| T6 | Load and licensing events | `tool_call` adds `mcpSessionId`, `priorityClass`, `licenseFeatures`, `seatHoldMs?`; separate `rate_limited`, `admission_rejected`, `mcp_session_opened/closed` events |
+| T6 | Load and licensing events | `tool_call` adds `mcpSessionId`, `priorityClass`, `licenseFeatures`; `license_released` carries the seat hold time and failed releases (LIC14); separate `rate_limited`, `admission_rejected`, `mcp_session_opened/closed` events |
 
 ## 6. Request pipeline
 
@@ -321,10 +321,25 @@ MCP request (within an MCP session, P4)
 
 ## 10. Open questions
 
-- **Product owners:** confirm the WF-1..5 success criteria and criticality; whether agent writes need user confirmation (W3); how to report the previous colour after a retried write (W6); adopt `not_found` / `result_too_large` (E1).
-- **Licensing team:** seat release timing on caller timeout (LIC14); which capabilities beyond rendering need feature licences; whether the app already consumes the rendering licence inside its COM render call (LIC10, critical); which activation methods must be supported in v1; licence binding to user vs machine (LIC13); caching/revocation rules (LIC12).
+- **Product owners:** confirm the WF-1..5 success criteria and criticality. (W3, W6 and E1 were decided for the prototype on 2026-10-14; see §11.)
+- **Licensing team:** confirm the LIC14 decision (§11); which capabilities beyond rendering need feature licences; whether the app already consumes the rendering licence inside its COM render call (LIC10, critical); which activation methods must be supported in v1; licence binding to user vs machine (LIC13); caching/revocation rules (LIC12).
 - **Product/UX:** acceptable impact on the human user (UI latency budget, MCP duty cycle); priority between `app` and `agent` callers; rate-limit defaults per session (P1, P5, P7).
 - **Architects (CAD/COM):** whether the user-activity signal is an event or must be polled, and its cost (P2); whether render supports async/progress/cancel (P13); undo/transaction support (W4); how elements are identified stably across sessions; the colour model (index vs RGB); whether view capture is supported headless.
 - **Identity/auth team:** whether the remote auth service supports delegated tokens with an actor claim, what scopes exist per actor, token lifetime, and the stdio session-vs-call identity model (D6).
 - **Architects:** whether the COM server is in-process or out-of-process and its threading model; whether a type library exists; whether dialogs can be suppressed; supported app versions.
 - **Python MCP team:** error format, telemetry schema, PII rules, existing KPI dashboards to align with.
+
+## 11. Decision log
+
+Decisions taken by the candidate on 2026-10-14 for the prototype. The external owners in §10 still need to confirm them; they are recorded here so the code and the plan agree.
+
+| Ref | Decision | Rejected alternative | Where |
+|---|---|---|---|
+| E1 | Adopt `not_found` and `result_too_large` | Keep stale IDs as `app_error`; report oversized results as `invalid_input` | `src/errors.ts`, `src/comSession.ts`, tests 10c and 12c |
+| W6 | `previousReliable: false` when a write was retried after a lost session | Read colours before writing (two COM calls, not atomic); document only | `src/tools.ts` (`mapResult`), tests 10/10b/10d |
+| LIC14 | Release licence leases when COM really finishes; emit `license_released` with hold time and failed releases | Release at caller timeout (under-counts seat usage) | `src/pipeline.ts`, `ComSession.execute(…, onSettled)`, tests 14a–14d |
+| W3 / D7 | No confirmation for agent writes in the prototype; scope `model:write` is the gate | Require `confirm: true` now | Revisit at M4 |
+| D6 | Verify the delegated token per call | Per session + re-verify on expiry | Revisit at M4 |
+| §3.2 | KPI limits are provisional targets for the fake-backed gates | Leave unsigned | Re-baseline at M5 |
+| CI | `npm run validate` stays a separate CI step, not part of `npm run check` | Fold it into `check` and the pre-push hook | `package.json`, `.github/workflows/ci.yml` |
+| Telemetry | Unknown tool names are recorded as sent (not bucketed) | Bucket to `"unknown"` to bound cardinality | Known risk; revisit with the Python MCP telemetry schema |

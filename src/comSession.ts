@@ -30,6 +30,7 @@ export interface CallResult {
   attempts: number;
   queueWaitMs: number;
   comMs: number;
+  reconnected: boolean; // a retry followed a lost session, so an earlier attempt may have run (W6)
 }
 
 interface Progress {
@@ -38,6 +39,7 @@ interface Progress {
   attempts: number;
   queueWaitMs: number;
   comMs: number;
+  reconnected: boolean;
   hresult?: number;
 }
 
@@ -65,10 +67,22 @@ export class ComSession {
     return this.state;
   }
 
-  /** Queues a COM call. Calls run one at a time, first in, first out (S2). */
-  execute(method: string, args: unknown[], retryable: boolean): Promise<CallResult> {
-    const p: Progress = { started: false, enqueuedAt: Date.now(), attempts: 0, queueWaitMs: 0, comMs: 0 };
+  /**
+   * Queues a COM call. Calls run one at a time, first in, first out (S2).
+   * `onSettled` fires exactly once, when the COM work has really finished (or straight away if the
+   * call was never admitted). That can be after the caller got `timeout` (LIC14).
+   */
+  execute(method: string, args: unknown[], retryable: boolean, onSettled?: () => void): Promise<CallResult> {
+    const p: Progress = {
+      started: false,
+      enqueuedAt: Date.now(),
+      attempts: 0,
+      queueWaitMs: 0,
+      comMs: 0,
+      reconnected: false,
+    };
     if (this.pending >= this.config.maxPending) {
+      onSettled?.();
       return Promise.reject(fail("app_busy", "Session queue is full", p));
     }
     this.pending++;
@@ -76,7 +90,12 @@ export class ComSession {
     const run = this.tail.then(() => this.runWithPolicy(method, args, retryable, deadline, p));
     // The queue only moves on when the COM call really ends, even if its caller already
     // got a timeout: the app's single thread is still busy until then.
-    this.tail = run.catch(() => undefined).finally(() => this.pending--);
+    this.tail = run
+      .catch(() => undefined)
+      .finally(() => {
+        this.pending--;
+        onSettled?.();
+      });
     return withDeadline(run, deadline, p);
   }
 
@@ -99,7 +118,7 @@ export class ComSession {
       try {
         const value = await this.client.call(method, args);
         p.comMs += Date.now() - callStart;
-        return { value, attempts: p.attempts, queueWaitMs: p.queueWaitMs, comMs: p.comMs };
+        return { value, attempts: p.attempts, queueWaitMs: p.queueWaitMs, comMs: p.comMs, reconnected: p.reconnected };
       } catch (err) {
         p.comMs += Date.now() - callStart;
         if (!(err instanceof ComError)) throw fail("internal", "COM adapter threw a non-COM error", p);
@@ -109,6 +128,7 @@ export class ComSession {
           this.transition("faulted", `hresult 0x${err.hresult.toString(16)}`);
           if (!retryable || reconnected) throw fail("app_unavailable", "COM session lost", p);
           reconnected = true; // one reconnect + one retry (E5)
+          p.reconnected = true;
           continue;
         }
         if (kind === "transient") {
@@ -118,6 +138,7 @@ export class ComSession {
           await sleep(delay);
           continue;
         }
+        if (kind === "not_found") throw fail("not_found", "COM reported an unknown ID", p);
         throw fail("app_error", "COM call failed", p);
       }
     }

@@ -2,7 +2,7 @@
 
 A take-home exercise: introduce an **MCP (Model Context Protocol) server** for a desktop **CAD application** whose capabilities are only available through a **COM API**. It must behave like an existing MCP integration that sits on top of a Python API, using the same authentication, licensing, telemetry and error patterns, so agents and users get a consistent experience.
 
-> **Status: prototype on fakes.** Design, constraints and KPIs: [`docs/plan.md`](docs/plan.md). Implemented from [`docs/superpowers/plans/2026-10-14-com-mcp-prototype.md`](docs/superpowers/plans/2026-10-14-com-mcp-prototype.md): the request pipeline, error taxonomy, delegated auth, licence layers, single COM session (queue, deadline, retry, reconnect), all 8 MVP tools, a KPI calculator and a validation runner. Everything runs against in-memory fakes; there is no real COM adapter or MCP transport yet. Last local run: `npm run check` → typecheck clean, 63/63 tests; `npm run validate` → 18/18 gates pass over 195 simulated calls. These are fake-backed numbers and say nothing about real COM performance.
+> **Status: prototype on fakes.** Design, constraints and KPIs: [`docs/plan.md`](docs/plan.md). Implemented from [`docs/superpowers/plans/2026-10-14-com-mcp-prototype.md`](docs/superpowers/plans/2026-10-14-com-mcp-prototype.md): the request pipeline, error taxonomy, delegated auth, licence layers, single COM session (queue, deadline, retry, reconnect), all 8 MVP tools, a KPI calculator and a validation runner, plus the final decisions in [§11](docs/plan.md#11-decision-log) (`not_found`, W6 `previousReliable`, LIC14 seat timing). Everything runs against in-memory fakes; there is no real COM adapter or MCP transport yet. Last local run: `npm run check` → typecheck clean, 71/71 tests; `npm run validate` → 18/18 gates pass over 195 simulated calls. These are fake-backed numbers and say nothing about real COM performance.
 
 ## The problem
 
@@ -60,13 +60,14 @@ validate → delegated auth (user + acting agent/app) → per-session rate limit
 
 **Validation** ([§3](docs/plan.md)): hard gates that block a release (e.g. 0 unauthorized calls reach COM, 0 modifiers started while the user is active, 0 licence secrets in telemetry). Proposed performance KPIs are placeholders until baselined against the real app. Five validation layers: L1 contract → L2 fault injection → L3 Windows integration → L4 agent workflow evals → L5 soak / load with scripted UI activity.
 
-**Open questions** for product, architecture, licensing and the Python MCP team are listed in [§10](docs/plan.md).
+**Decisions** taken for the prototype are logged in [§11](docs/plan.md#11-decision-log). **Open questions** for product, architecture, licensing and the Python MCP team are listed in [§10](docs/plan.md).
 
 ## Repository layout
 
 ```
 docs/plan.md              Design, constraints, KPIs, test plan, milestones (source of truth)
 docs/superpowers/plans/   Task-by-task implementation plan (M1–M3 + validation runner; executed)
+docs/ai-sessions/         Curated record of the two Claude Code sessions that built this repo
 src/                      Pipeline, COM session, tools, auth/licence contracts, fakes, KPIs
 src/validation/           Workflow scenarios + gate runner (`npm run validate`)
 test/                     node:test suites
@@ -117,3 +118,5 @@ Notes:
 ## AI-assisted workflow
 
 This project was developed collaboratively with Claude Code under the working agreement in [`CLAUDE.md`](CLAUDE.md). I own requirements and decisions. The assistant proposes options, flags assumptions and must not invent results. Anything marked _(proposed)_ or _(open)_ in the plan is explicitly not yet decided.
+
+The repo was built in two parallel Claude Code sessions, one for design and one for prototype and validation, which coordinated by sending each other messages. [`docs/ai-sessions/`](docs/ai-sessions/README.md) records my prompts, what each session proposed, the decisions I made, how the work was verified, and where the AI made interpretations or took decisions on my behalf.

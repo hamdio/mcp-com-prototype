@@ -1,4 +1,5 @@
 // Declarative tool table (plan.md §2 tool catalogue). Adding a COM call = adding one entry here.
+import type { CallResult } from "./comSession.ts";
 import { ToolError } from "./errors.ts";
 
 /** plan.md P10: view/model/heavy are "modifiers". `heavy` (render) is not in the MVP catalogue. */
@@ -14,6 +15,8 @@ export interface ToolDef {
   comMethod: string; // PLACEHOLDER names until the architects confirm the real COM API
   /** Validates the input and maps it to COM arguments. Throws ToolError("invalid_input"). */
   toArgs(input: unknown): unknown[];
+  /** Shapes the agent-facing result from the raw COM value; defaults to the value itself. */
+  mapResult?(value: unknown, call: CallResult): unknown;
   /** Element count for write telemetry (W5); never element contents. */
   elementCount?(args: unknown[]): number;
   /** A valid sample input; the contract tests run every tool with it. */
@@ -151,6 +154,9 @@ export const SET_ELEMENT_COLOR: ToolDef = {
   comMethod: "Element.SetColor",
   toArgs: (input) => [requireIds(input, "ids"), requireColor(input, "color")],
   elementCount: (args) => (args[0] as string[]).length,
+  // W6: after a retry that followed a lost session, an earlier attempt may already have applied
+  // the colour, so the reported previous colours may be the new ones. Busy rejections never ran.
+  mapResult: (value, call) => ({ ...(value as object), previousReliable: !call.reconnected }),
   example: { ids: ["box-1"], color: "#FF0000" },
 };
 
