@@ -2,10 +2,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { AuthClient, Principal } from "./auth.ts";
 import type { ComClient } from "./comSession.ts";
-import { ComError, RPC_E_CALL_REJECTED, ToolError } from "./errors.ts";
+import { ComError, ERROR_NOT_FOUND, RPC_E_CALL_REJECTED, ToolError } from "./errors.ts";
 import { BASE_LICENSE, type LicenseClient, type LicenseLease } from "./license.ts";
 import { SCOPES } from "./tools.ts";
-import type { SessionStateEvent, Telemetry, TelemetryEvent, ToolCallEvent } from "./telemetry.ts";
+import type { LicenseReleasedEvent, SessionStateEvent, Telemetry, TelemetryEvent, ToolCallEvent } from "./telemetry.ts";
 
 export class FakeAuth implements AuthClient {
   down = false;
@@ -28,6 +28,7 @@ export class FakeAuth implements AuthClient {
 /** Grants per subject; features listed in `seatFeatures` behave as floating seats and count checkouts. */
 export class FakeLicense implements LicenseClient {
   down = false;
+  failReleases = false; // seat releases throw, to test that leaks are reported
   readonly checks: Array<{ subject: string; feature: string }> = [];
   seatsHeld = 0;
   private readonly grants: Map<string, Set<string>>;
@@ -42,11 +43,13 @@ export class FakeLicense implements LicenseClient {
     this.checks.push({ subject, feature });
     if (this.down) throw new Error("licence server timeout");
     if (!this.grants.get(subject)?.has(feature)) throw new ToolError("unlicensed", `No ${feature} licence`);
-    if (!this.seatFeatures.has(feature)) return { release: async () => {} };
+    if (!this.seatFeatures.has(feature)) return { kind: "entitlement", release: async () => {} };
     this.seatsHeld++;
     let released = false;
     return {
+      kind: "seat",
       release: async () => {
+        if (this.failReleases) throw new Error("licence server unreachable");
         if (released) return;
         released = true;
         this.seatsHeld--;
@@ -149,7 +152,6 @@ export interface ElementFilter {
   layer: string | null;
 }
 
-const E_INVALIDARG = 0x80070057;
 const DISP_E_UNKNOWNNAME = 0x80020006;
 
 /**
@@ -238,18 +240,18 @@ export class FakeCadModel {
 
   private get(id: string): FakeElement {
     const element = this.elements.get(id);
-    if (!element) throw new ComError(E_INVALIDARG, `Element ${id} not found`);
+    if (!element) throw new ComError(ERROR_NOT_FOUND, `Element ${id} not found`);
     return element;
   }
 
   private requireView(viewId: string): void {
-    if (viewId !== this.activeViewId) throw new ComError(E_INVALIDARG, `View ${viewId} not found`);
+    if (viewId !== this.activeViewId) throw new ComError(ERROR_NOT_FOUND, `View ${viewId} not found`);
   }
 }
 
 function page(list: FakeElement[], pageSize: number, cursor: string | null) {
   const offset = cursor === null ? 0 : Number(cursor);
-  if (!Number.isInteger(offset) || offset < 0) throw new ComError(E_INVALIDARG, `Bad cursor ${cursor}`);
+  if (!Number.isInteger(offset) || offset < 0) throw new ComError(0x80070057, `Bad cursor ${cursor}`); // E_INVALIDARG
   const items = list.slice(offset, offset + pageSize).map(({ id, type, level, layer }) => ({ id, type, level, layer }));
   const next = offset + pageSize;
   return { items, total: list.length, nextCursor: next < list.length ? String(next) : null };
@@ -268,6 +270,10 @@ export class RecordingTelemetry implements Telemetry {
 
   sessionStates(): SessionStateEvent[] {
     return this.events.filter((e): e is SessionStateEvent => e.type === "session_state");
+  }
+
+  licenseReleases(): LicenseReleasedEvent[] {
+    return this.events.filter((e): e is LicenseReleasedEvent => e.type === "license_released");
   }
 }
 

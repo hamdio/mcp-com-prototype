@@ -26,7 +26,6 @@ export interface ToolCallEvent {
   elementCount?: number; // writes only (W5)
   licenseFeatures?: string[]; // layers checked, including "base" (L8)
   deniedFeature?: string;
-  seatHoldMs?: number;
   sessionId: string;
 }
 
@@ -40,7 +39,16 @@ export interface SessionStateEvent {
   reason: string;
 }
 
-export type TelemetryEvent = ToolCallEvent | SessionStateEvent;
+/** Emitted when a call's licence leases are released, which can be after the call returned (LIC14). */
+export interface LicenseReleasedEvent {
+  type: "license_released";
+  correlationId: string;
+  features: string[];
+  seatHoldMs: number;
+  failed: string[]; // features whose release threw: a possible seat leak
+}
+
+export type TelemetryEvent = ToolCallEvent | SessionStateEvent | LicenseReleasedEvent;
 
 export interface Telemetry {
   emit(event: TelemetryEvent): void;

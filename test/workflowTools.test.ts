@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { RPC_E_CALL_REJECTED } from "../src/errors.ts";
+import { RPC_E_CALL_REJECTED, RPC_S_SERVER_UNAVAILABLE } from "../src/errors.ts";
 import { handleToolCall } from "../src/pipeline.ts";
 import { request, setup } from "./helpers.ts";
 
@@ -10,8 +10,8 @@ test("10. set_element_color twice gives the same end state and reports each prev
   const { model, deps } = setup();
   const first = await handleToolCall(deps, request("set_element_color", paint));
   const second = await handleToolCall(deps, request("set_element_color", paint, { correlationId: "c-2" }));
-  assert.deepEqual(first, { ok: true, data: { previous: [{ id: "box-1", color: "#808080" }] } });
-  assert.deepEqual(second, { ok: true, data: { previous: [{ id: "box-1", color: "#FF0000" }] } });
+  assert.deepEqual(first, { ok: true, data: { previous: [{ id: "box-1", color: "#808080" }], previousReliable: true } });
+  assert.deepEqual(second, { ok: true, data: { previous: [{ id: "box-1", color: "#FF0000" }], previousReliable: true } });
   assert.equal(model.elements.get("box-1")?.color, "#FF0000");
 });
 
@@ -19,18 +19,31 @@ test("10b. set_element_color is retried on a transient error (idempotent set), a
   const { com, telemetry, deps } = setup();
   com.enqueue({ hresult: RPC_E_CALL_REJECTED });
   const result = await handleToolCall(deps, request("set_element_color", paint));
-  assert.equal(result.ok, true);
+  assert.equal(result.ok && (result.data as { previousReliable: boolean }).previousReliable, true); // busy = never ran
   const [event] = telemetry.toolCalls();
   assert.equal(event?.attempts, 2);
   assert.equal(event?.elementCount, 1);
   assert.equal(event?.effect, "model");
 });
 
-test("10c. an unknown element ID changes nothing (all-or-nothing)", async () => {
-  const { model, deps } = setup();
+test("10c. an unknown element ID → not_found and changes nothing (all-or-nothing, E1)", async () => {
+  const { model, telemetry, deps } = setup();
   const result = await handleToolCall(deps, request("set_element_color", { ids: ["box-1", "missing"], color: "#FF0000" }));
-  assert.equal(!result.ok && result.error.code, "app_error");
+  assert.deepEqual(!result.ok && result.error, {
+    code: "not_found",
+    message: "An element or view with that ID was not found.",
+    correlationId: "c-1",
+  });
   assert.equal(model.elements.get("box-1")?.color, "#808080");
+  assert.equal(telemetry.toolCalls()[0]?.attempts, 1); // not retried
+});
+
+test("10d. a write retried after a lost session flags its previous colours as unreliable (W6)", async () => {
+  const { model, com, deps } = setup();
+  model.elements.get("box-1")!.color = "#FF0000"; // as if the lost attempt had already applied
+  com.enqueue({ hresult: RPC_S_SERVER_UNAVAILABLE });
+  const result = await handleToolCall(deps, request("set_element_color", paint));
+  assert.deepEqual(result, { ok: true, data: { previous: [{ id: "box-1", color: "#FF0000" }], previousReliable: false } });
 });
 
 test("11. a write without explicit IDs → invalid_input; a read-only agent → forbidden; COM untouched", async () => {

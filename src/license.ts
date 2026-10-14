@@ -4,6 +4,7 @@ export const BASE_LICENSE = "base";
 
 /** What a granted check returns. A plain entitlement check returns a lease whose release() does nothing. */
 export interface LicenseLease {
+  readonly kind: "entitlement" | "seat"; // seats are reported with their hold time (LIC6)
   release(): Promise<void>;
 }
 

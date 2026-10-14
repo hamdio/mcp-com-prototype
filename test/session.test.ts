@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ComSession, type SessionConfig } from "../src/comSession.ts";
-import { RPC_E_CALL_REJECTED, RPC_S_SERVER_UNAVAILABLE, ToolError, type ErrorCode } from "../src/errors.ts";
+import { ERROR_NOT_FOUND, RPC_E_CALL_REJECTED, RPC_S_SERVER_UNAVAILABLE, ToolError, type ErrorCode } from "../src/errors.ts";
 import { FakeComClient, RecordingTelemetry } from "../src/fakes.ts";
 
 const config: SessionConfig = { maxPending: 10, deadlineMs: 200, retryAttempts: 3, retryBaseMs: 5 };
@@ -68,6 +68,7 @@ test("transient busy then success → retried, attempts 2", async () => {
   const result = await session.execute("A", [], true);
   assert.equal(result.value, "done");
   assert.equal(result.attempts, 2);
+  assert.equal(result.reconnected, false); // a busy rejection never ran, so this is not a reconnect
 });
 
 test("transient errors stop after retryAttempts → app_busy", async () => {
@@ -109,6 +110,7 @@ test("app gone → one reconnect and one retry", async () => {
   const result = await session.execute("A", [], true);
   assert.equal(result.value, "after reconnect");
   assert.equal(result.attempts, 2);
+  assert.equal(result.reconnected, true);
   assert.equal(com.connects, 2);
   assert.deepEqual(telemetry.sessionStates().map((e) => e.to), ["connecting", "ready", "faulted", "reconnecting", "ready"]);
 });
@@ -131,4 +133,25 @@ test("a non-COM throw from the adapter → internal, not retried", async () => {
   com.enqueue({ throws: new TypeError("bug in adapter") }, { ok: "unused" });
   await assert.rejects(session.execute("A", [], true), isCode("internal"));
   assert.equal(com.calls.length, 1);
+});
+
+test("not-found HRESULT → not_found, not retried (E1)", async () => {
+  const { com, session } = setup();
+  com.enqueue({ hresult: ERROR_NOT_FOUND }, { ok: "unused" });
+  await assert.rejects(session.execute("A", [], true), (e) => isCode("not_found")(e) && (e as ToolError).meta.attempts === 1);
+  assert.equal(com.calls.length, 1);
+});
+
+test("onSettled fires once when COM finishes, once on admission rejection, and only after a hung call ends (LIC14)", async () => {
+  const { com, session } = setup({ maxPending: 1, deadlineMs: 30 });
+  const settled: string[] = [];
+  com.enqueue({ ok: "slow", delayMs: 80 });
+  const hung = session.execute("A", [], true, () => settled.push("A"));
+  const rejected = session.execute("B", [], true, () => settled.push("B"));
+  await assert.rejects(rejected, isCode("app_busy"));
+  assert.deepEqual(settled, ["B"]);
+  await assert.rejects(hung, isCode("timeout"));
+  assert.deepEqual(settled, ["B"]); // caller has timed out, but COM is still running
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(settled, ["B", "A"]);
 });

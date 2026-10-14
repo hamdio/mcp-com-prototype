@@ -63,3 +63,11 @@ test("non-user error rate counts app/timeout/internal but not denials", () => {
   ];
   assert.equal(computeKpis(events, expectIds(["a", "b", "c", "d"])).metrics.nonUserErrorRate, 0.25);
 });
+
+test("not_found and result_too_large are agent-side, so they don't count as non-user errors", () => {
+  const events = [
+    call("a", { outcome: "error", errorCode: "not_found" }),
+    call("b", { outcome: "error", errorCode: "result_too_large" }),
+  ];
+  assert.equal(computeKpis(events, expectIds(["a", "b"])).metrics.nonUserErrorRate, 0);
+});
