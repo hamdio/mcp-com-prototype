@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { solve } from "../src/solution.ts";
+import { ALL_TOOLS, handleToolCall, M1_TOOLS } from "../src/solution.ts";
 
-test("smoke test: local TS runtime works", () => {
-  assert.equal(solve({ values: [1, 2, 3] }), 6);
-});
-
-test("edge case: empty input", () => {
-  assert.equal(solve({ values: [] }), 0);
+test("public entry exports the pipeline and tools", () => {
+  assert.equal(typeof handleToolCall, "function");
+  assert.deepEqual(M1_TOOLS.map((t) => t.name), ["get_app_info", "query_elements"]);
+  assert.equal(ALL_TOOLS.length, 8);
 });

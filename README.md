@@ -2,7 +2,7 @@
 
 A take-home exercise: introduce an **MCP (Model Context Protocol) server** for a desktop **CAD application** whose capabilities are only available through a **COM API**. It must behave like an existing MCP integration that sits on top of a Python API, using the same authentication, licensing, telemetry and error patterns, so agents and users get a consistent experience.
 
-> **Status: design stage.** The design, constraints, validation suite and plan are complete in [`docs/plan.md`](docs/plan.md). A task-by-task implementation plan for M1–M3 plus the validation runner is in [`docs/superpowers/plans/2026-10-14-com-mcp-prototype.md`](docs/superpowers/plans/2026-10-14-com-mcp-prototype.md), but it has **not been executed yet**. The TypeScript code in `src/` is still the starter scaffold. CI and local gates are already wired, so every milestone lands behind them.
+> **Status: prototype on fakes.** Design, constraints and KPIs: [`docs/plan.md`](docs/plan.md). Implemented from [`docs/superpowers/plans/2026-10-14-com-mcp-prototype.md`](docs/superpowers/plans/2026-10-14-com-mcp-prototype.md): the request pipeline, error taxonomy, delegated auth, licence layers, single COM session (queue, deadline, retry, reconnect), all 8 MVP tools, a KPI calculator and a validation runner. Everything runs against in-memory fakes; there is no real COM adapter or MCP transport yet. Last local run: `npm run check` → typecheck clean, 63/63 tests; `npm run validate` → 18/18 gates pass over 195 simulated calls. These are fake-backed numbers and say nothing about real COM performance.
 
 ## The problem
 
@@ -66,8 +66,9 @@ validate → delegated auth (user + acting agent/app) → per-session rate limit
 
 ```
 docs/plan.md              Design, constraints, KPIs, test plan, milestones (source of truth)
-docs/superpowers/plans/   Task-by-task implementation plan (M1–M3 + validation runner; not yet executed)
-src/                      Implementation (starter scaffold until Milestone 1)
+docs/superpowers/plans/   Task-by-task implementation plan (M1–M3 + validation runner; executed)
+src/                      Pipeline, COM session, tools, auth/licence contracts, fakes, KPIs
+src/validation/           Workflow scenarios + gate runner (`npm run validate`)
 test/                     node:test suites
 .github/workflows/ci.yml  CI: typecheck + tests on Ubuntu and Windows
 .githooks/                Local gates: pre-commit (typecheck), pre-push (full check)
@@ -93,21 +94,22 @@ npm run start
 | pre-commit hook | Every local commit | `npm run typecheck` |
 | pre-push hook | Every local push | `npm run check` |
 | CI (GitHub Actions) | Every push to `main` and every PR; Ubuntu + Windows | `npm ci && npm run check` |
-| CI validation gates | Same, once `src/validation/cli.ts` exists (Milestone 1) | `npm run validate`: runs the MVP workflows on fakes with seeded fault injection; fails on any §3.1 hard gate |
+| CI validation gates | Same as CI | `npm run validate`: runs the MVP workflows on fakes with seeded fault injection; fails on any §3.1 hard gate |
 
 Notes:
 - Hooks can be bypassed with `--no-verify` in an emergency; CI cannot.
 - Validation layers L3–L5 need the real CAD application, so they are planned for a self-hosted Windows runner and are not part of CI yet.
-- Known risk: session and deadline tests will use short real-time windows, which can flake on slow Windows runners. The planned fix is an injectable clock, which the UI duty-cycle tests need anyway.
+- Known gaps (closed by M2b): modifiers are not yet gated on desktop-user activity (P11), and session/deadline tests use short real-time windows, which could flake on slow Windows runners. The planned fix is an injectable clock.
 
 ## Milestones
 
 | # | Scope | Status |
 |---|---|---|
 | M0 | Workflows, KPIs, delegation model | Workflows agreed; KPIs and delegation awaiting sign-off |
-| M1 | Pipeline, error taxonomy, delegation, telemetry on fakes (`get_app_info`, `query_elements`) | Next: implementation plan written ([Tasks 1–4](docs/superpowers/plans/2026-10-14-com-mcp-prototype.md)), awaiting approval |
-| M2 / 2b | COM session (queue, deadline, retry, reconnect); tiered licensing; rate limits; fair scheduler; user-idle gating | Planned |
-| M3 | Remaining read/view tools, then the WF-3 write | Planned |
+| M1 | Pipeline, error taxonomy, delegation, telemetry on fakes (`get_app_info`, `query_elements`) | Done (on fakes) |
+| M2 | COM session (queue, deadline, retry, reconnect); base + feature licence layers with seats | Done (on fakes) |
+| M2b | Rate limits; fair scheduler; user-idle gating for modifiers; rendering activation providers; injectable clock (tests 15–24) | Next: follow-on plan needed |
+| M3 | Remaining read/view tools and the WF-3 write; KPI calculator + validation runner | Done (on fakes) |
 | M4 | MCP stdio transport (adds `@modelcontextprotocol/sdk`) | Planned |
 | M5 | Real `ComClient` on Windows; L3 integration; baseline KPIs | Planned |
 | M6 | L4 agent workflow evals; L5 soak/load against the KPI gates | Planned |

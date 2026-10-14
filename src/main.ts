@@ -1,3 +1,1 @@
-import { solve } from "./solution.ts";
-
-console.log(solve({ values: [1, 2, 3] }));
+import "./validation/cli.ts";

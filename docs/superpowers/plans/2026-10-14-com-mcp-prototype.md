@@ -39,6 +39,8 @@ These failure modes aren't the headline of any test number in plan.md §8, but t
 - **A retried write reports the wrong "previous" colour.** If attempt 1 applied the colour but the call then failed (session lost mid-call), the retry's `previous` is the new colour.
 - **A stale element ID surfaces as `app_error`.** The taxonomy has no `not_found` (E1).
 - **The seat is released at caller timeout** while COM may still be rendering (interacts with LIC10).
+- **Failed seat releases are invisible.** `lease.release()` failures are swallowed with no telemetry, so a seat leak in production couldn't be seen. Found in execution review.
+- **Unknown tool names are logged verbatim** in telemetry, so the field's cardinality is unbounded. Found in execution review.
 
 ## Decisions taken in this plan (flag to the candidate)
 
@@ -1623,8 +1625,9 @@ export { handleToolCall, type PipelineDeps, type ToolRequest, type ToolResult } 
 export { ComSession, DEFAULT_SESSION_CONFIG, type ComClient, type SessionConfig } from "./comSession.ts";
 export { ALL_TOOLS, createRegistry, M1_TOOLS, type ToolDef } from "./tools.ts";
 export { BASE_LICENSE, type LicenseClient, type LicenseLease } from "./license.ts";
-export { computeKpis, DEFAULT_LIMITS } from "./kpi.ts";
 ```
+
+(The `./kpi.ts` re-export is added in Task 6, once that file exists.)
 
 - [ ] **Step 5: Run the tests and make sure they pass**
 
@@ -2045,7 +2048,13 @@ export function computeKpis(events: TelemetryEvent[], expect: Expectations, limi
 Run: `npx tsx --test test/kpi.test.ts`
 Expected: `ℹ pass 8`, `ℹ fail 0`.
 
-- [ ] **Step 5: Checkpoint.** `npm test` passes.
+- [ ] **Step 5: Export the KPI calculator** by appending this line to `src/solution.ts`:
+
+```ts
+export { computeKpis, DEFAULT_LIMITS } from "./kpi.ts";
+```
+
+- [ ] **Step 6: Checkpoint.** `npm test` passes.
 
 ---
 
