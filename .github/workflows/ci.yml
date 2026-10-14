@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck + tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is included because the real COM adapter will only ever run there.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Validation layers L1 (contract) and L2 (fault injection) run on fakes.
+      # L3–L5 need the real CAD app on Windows; see docs/plan.md §3.4.
+      - run: npm run check
+      # Workflow + gate runner on fakes (exits 1 on any §3.1 gate failure).
+      # Skipped until the runner lands in Milestone 1.
+      - name: Validation gates
+        if: hashFiles('src/validation/cli.ts') != ''
+        run: npm run validate

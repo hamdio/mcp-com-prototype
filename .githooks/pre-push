@@ -1,0 +1,7 @@
+#!/bin/sh
+# Full local gate, the same command CI runs. Bypass with `git push --no-verify`.
+echo "pre-push: npm run check"
+npm run check --silent || {
+  echo "pre-push: typecheck or tests failed; push aborted." >&2
+  exit 1
+}
