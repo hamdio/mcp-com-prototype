@@ -68,6 +68,7 @@ validate → delegated auth (user + acting agent/app) → per-session rate limit
 docs/plan.md              Design, constraints, KPIs, test plan, milestones (source of truth)
 docs/superpowers/plans/   Task-by-task implementation plan (M1–M3 + validation runner; executed)
 docs/ai-sessions/         Curated record of the two Claude Code sessions that built this repo
+docs/research/            Research behind review follow-ups (MCP harness, COM bridging, user interference)
 src/                      Pipeline, COM session, tools, auth/licence contracts, fakes, KPIs
 src/validation/           Workflow scenarios + gate runner (`npm run validate`)
 test/                     node:test suites
