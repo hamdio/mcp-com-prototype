@@ -5,7 +5,7 @@ This folder holds the research behind my answers to three review questions about
 | Question | Short answer | Evidence |
 |---|---|---|
 | **Q1.** Used from an agent harness such as Claude via MCP, what's missing? Where is it awkward, especially authentication and `capture_view` image data? | The pipeline doesn't depend on any transport, but the MCP layer is missing, and so is OAuth. Today `capture_view` would return base64 inside JSON; it should return an MCP image block instead. | [1-mcp-harness-auth-images.md](1-mcp-harness-auth-images.md) |
-| **Q2.** How would Node talk to the CAD app's COM API? What happens when a person and the automation drive the same app? How do we pick the right instance? | Through a small out-of-process .NET helper that owns an STA thread and a message filter. Attach only to a running copy, choose it explicitly, and reconnect only to the same process. | [2-node-com-bridging.md](2-node-com-bridging.md), [3-shared-instance-targeting.md](3-shared-instance-targeting.md) |
+| **Q2.** How would Node talk to the CAD app's COM API? What happens when a person and the automation drive the same app? How do we pick the right instance? | Through a small out-of-process .NET helper that owns an STA thread and a message filter. Attach only to a running copy, choose it explicitly, and reconnect only to the same process. In any conflict the user wins: the automation backs off, uses explicit IDs, and leaves one undoable step per change. | [2-node-com-bridging.md](2-node-com-bridging.md), [3-shared-instance-targeting.md](3-shared-instance-targeting.md) |
 | **Q3.** How do we stop automation interfering with an active user, and what are the biggest risks? | Detect user activity, budget how much UI-thread time automation gets, and protect the user's state. The biggest risk is a long COM call that can't be interrupted and freezes the UI. Measure first, then set hard limits. | [4-user-interference-risks.md](4-user-interference-risks.md) |
 
 ## How these notes were produced
@@ -69,6 +69,23 @@ Details are in note 1, section "GitHub merge gating".
 - Attach only to a copy the user already has open; never launch a hidden one.
 - Choose the copy explicitly, by open document or process ID, and refuse to guess if more than one matches.
 - Reconnect only to the same process, identified by a stored fingerprint (PID plus process start time).
+
+### Resolving conflicts with the user
+
+Spotting conflicts is half the answer. The rule for resolving them is that **the person using the app always wins**. The automation yields, and any change it does make should be easy to see and easy to undo.
+
+| Conflict | Resolution | Status |
+|---|---|---|
+| The app rejects a call because the user has a dialog or command open (`RPC_E_CALL_REJECTED` / `RETRYLATER`) | The helper's message filter fails fast instead of showing a "server busy" dialog. Retry and backoff stay in `ComSession`. Repeated rejections count as "user active", so the server stops retrying and reports `user_active` instead of `app_busy` | Rejected calls are classified as transient and retried for retry-safe tools today (`src/errors.ts`, `src/comSession.ts`); the helper and the `user_active` mapping are proposed |
+| The user is working while the agent wants to change the model or the view | Modifying calls (`view`, `model`, `heavy`) start only after an idle grace period, with hysteresis. Read calls run within a UI-time budget. Long calls are refused while the user is active (see Q3) | Designed (plan.md P10–P14), not built |
+| The user switches document, view or selection between two agent calls | Agent tools never act on "the current selection" or the active view. Writes take explicit element IDs, and should also take the document ID, checked before every write. A stale ID returns `not_found` instead of touching something else | Explicit IDs and `not_found` in code; the document ID check is proposed |
+| The user and the agent edit the same element | Optimistic concurrency: the write succeeds only if the element hasn't changed since the agent read it, otherwise it returns a conflict. If the COM API has no version stamps, compare inside the same COM call | Proposed; depends on what the COM API exposes (unconfirmed) |
+| Agent and user changes interleave on the undo stack | Each agent change should be one named undo step ("Agent: set colour (3)"), so the user can undo it in one go. `set_element_color` already returns the previous colours as a fallback | Previous colours returned in code; undo grouping is unconfirmed (plan.md W4), with analogues in Revit `TransactionGroup` and AutoCAD undo markers |
+| The agent would move the user's view (e.g. `zoom_to_elements` → `capture_view`) | Capture an off-screen or named view where possible. Otherwise save the camera, zoom, capture and restore, all within one idle window | Proposed |
+| Locking the user out to make automation safe | Rejected. Office-style `Interactive = false` blocks keyboard and mouse input, and stays set if the automation crashes. That reverses "the user always wins" | Design decision |
+| A risky write from an agent | Writes need the `model:write` scope today. A first write triggers step-up consent (see Q1), and there are no save, close or open tools, so the agent can't commit or discard the user's work | Scope check and the tool catalogue in code; step-up proposed |
+
+Evidence: note 3 covers rejected calls, reentrancy and Office's interactive-app guidance. Note 4 Q4 covers state protection and undo-grouping analogues, and its risk register covers risks 4, 6, 7 and 9.
 
 ## Q3: user interference and risks
 
